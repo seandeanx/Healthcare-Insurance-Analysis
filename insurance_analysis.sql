@@ -108,74 +108,74 @@ order by diff_smoker_minus_nonsmoker desc;
 
 
 --3 Which factors (age group, BMI group, smoking status, and region) contribute the most to total insurance costs, and how do their impacts compare?
-with base as (
-  select
+WITH base AS (
+  SELECT
     charges,
     smoker,
     region,
-    case
-      when age between 18 and 25 then '18-25'
-      when age between 26 and 40 then '26-40'
-      when age between 41 and 60 then '41-60'
-      else '60+'
-    end as age_group,
-    case
-      when bmi < 18.5 then 'underweight'
-      when bmi < 25 then 'normal'
-      when bmi < 30 then 'overweight'
-      else 'obese'
-    end as bmi_group
-  from insurance
+    CASE
+      WHEN age < 30 THEN '0–29'
+      WHEN age BETWEEN 30 AND 39 THEN '30–39'
+      WHEN age BETWEEN 40 AND 49 THEN '40–49'
+      WHEN age BETWEEN 50 AND 59 THEN '50–59'
+      ELSE '60+'
+    END AS age_group,
+    CASE
+      WHEN bmi < 18.5 THEN 'underweight'
+      WHEN bmi < 25 THEN 'normal'
+      WHEN bmi < 30 THEN 'overweight'
+      ELSE 'obese'
+    END AS bmi_group
+  FROM insurance
 ),
-factor_totals as (
+factor_totals AS (
 
-  select
-    'age_group' as factor,
-    age_group as factor_level,
-    round(sum(charges) over (partition by age_group), 2) as total_cost,
-    row_number() over (partition by 'age_group', age_group order by age_group) as rn
-  from base
+  SELECT
+    'age_group' AS factor,
+    age_group AS factor_level,
+    ROUND(SUM(charges) OVER (PARTITION BY age_group), 2) AS total_cost,
+    ROW_NUMBER() OVER (PARTITION BY 'age_group', age_group ORDER BY age_group) AS rn
+  FROM base
 
-  union all
+  UNION ALL
 
-  select
-    'bmi_group' as factor,
-    bmi_group as factor_level,
-    round(sum(charges) over (partition by bmi_group), 2) as total_cost,
-    row_number() over (partition by 'bmi_group', bmi_group order by bmi_group) as rn
-  from base
+  SELECT
+    'bmi_group' AS factor,
+    bmi_group AS factor_level,
+    ROUND(SUM(charges) OVER (PARTITION BY bmi_group), 2) AS total_cost,
+    ROW_NUMBER() OVER (PARTITION BY 'bmi_group', bmi_group ORDER BY bmi_group) AS rn
+  FROM base
 
-  union all
+  UNION ALL
 
-  select
-    'smoker' as factor,
-    smoker as factor_level,
-    round(sum(charges) over (partition by smoker), 2) as total_cost,
-    row_number() over (partition by 'smoker', smoker order by smoker) as rn
-  from base
+  SELECT
+    'smoker' AS factor,
+    smoker AS factor_level,
+    ROUND(SUM(charges) OVER (PARTITION BY smoker), 2) AS total_cost,
+    ROW_NUMBER() OVER (PARTITION BY 'smoker', smoker ORDER BY smoker) AS rn
+  FROM base
 
-  union all
+  UNION ALL
 
-  select
-    'region' as factor,
-    region as factor_level,
-    round(sum(charges) over (partition by region), 2) as total_cost,
-    row_number() over (partition by 'region', region order by region) as rn
-  from base
+  SELECT
+    'region' AS factor,
+    region AS factor_level,
+    ROUND(SUM(charges) OVER (PARTITION BY region), 2) AS total_cost,
+    ROW_NUMBER() OVER (PARTITION BY 'region', region ORDER BY region) AS rn
+  FROM base
 ),
-final as (
-  select
+final AS (
+  SELECT
     factor,
     factor_level,
     total_cost,
-    round(100.0 * total_cost / (select sum(charges) from base), 2) as pct_of_total
-  from factor_totals
-  where rn = 1
+    ROUND(100.0 * total_cost / (SELECT SUM(charges) FROM base), 2) AS pct_of_total
+  FROM factor_totals
+  WHERE rn = 1
 )
-select *
-from final
-order by factor, total_cost desc;
-
+SELECT *
+FROM final
+ORDER BY factor, total_cost DESC;
 
 
 --4.Which types of people are responsible for most of the insurance money being spent?
@@ -184,9 +184,10 @@ with base as (
     charges,
     smoker,
     case
-      when age between 18 and 25 then '18-25'
-      when age between 26 and 40 then '26-40'
-      when age between 41 and 60 then '41-60'
+      when age < 30 then '0–29'
+      when age between 30 and 39 then '30–39'
+      when age between 40 and 49 then '40–49'
+      when age between 50 and 59 then '50–59'
       else '60+'
     end as age_group,
     case
@@ -229,43 +230,61 @@ where rn = 1
 order by segment_total_cost desc;
 
 
---5. What percentage of the total insurance cost comes from the top 10% most expensive customers, and how does this compare between smokers and non-smokers?
-with ranked as (
+
+-- 5. For each age group and BMI group, how much more do smokers pay on average compared to non-smokers?
+
+with base as (
   select
-    *,
-    ntile(10) over (order by charges desc) as decile
+    charges,
+    smoker,
+    case
+      when age < 30 then '0-29'
+      when age between 30 and 39 then '30-39'
+      when age between 40 and 49 then '40-49'
+      when age between 50 and 59 then '50-59'
+      else '60+'
+    end as age_group,
+    case
+      when bmi < 18.5 then 'underweight'
+      when bmi < 25 then 'normal'
+      when bmi < 30 then 'overweight'
+      else 'obese'
+    end as bmi_group
   from insurance
 ),
-top10 as (
-  select *
-  from ranked
-  where decile = 1
-),
-calc as (
+seg as (
   select
-    smoker,
-    sum(charges) over () as top10_total_cost,
-    sum(charges) over (partition by smoker) as top10_cost_by_smoker,
-    (select sum(charges) from ranked) as overall_total_cost
-  from top10
+    age_group,
+    bmi_group,
+    avg(case when smoker = 'yes' then charges end) as avg_smoker_charges,
+    avg(case when smoker = 'no'  then charges end) as avg_nonsmoker_charges
+  from base
+  group by age_group, bmi_group
 ),
-dedup as (
+final as (
   select
-    *,
-    row_number() over (partition by smoker order by smoker) as rn
-  from calc
+    age_group,
+    bmi_group,
+    round(avg_smoker_charges, 2) as avg_smoker_charges,
+    round(avg_nonsmoker_charges, 2) as avg_nonsmoker_charges,
+    round(
+      case
+        when avg_smoker_charges is null or avg_nonsmoker_charges is null then null
+        else avg_smoker_charges - avg_nonsmoker_charges
+      end
+    , 2) as smoker_premium,
+    rank() over (
+      order by
+        case
+          when avg_smoker_charges is null or avg_nonsmoker_charges is null then null
+          else avg_smoker_charges - avg_nonsmoker_charges
+        end desc
+    ) as premium_rank
+  from seg
 )
-select
-  'top 10% (all)' as group_name,
-  round(100.0 * (select sum(charges) from top10) / (select sum(charges) from ranked), 2) as pct_of_total_cost
+select *
+from final
+where smoker_premium is not null
+order by smoker_premium desc;
 
-union all
 
-select
-  case 
-    when smoker = 'yes' then 'top 10% smokers'
-    else 'top 10% non-smokers'
-  end as group_name,
-  round(100.0 * top10_cost_by_smoker / overall_total_cost, 2) as pct_of_total_cost
-from dedup
-where rn = 1;
